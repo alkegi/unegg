@@ -206,6 +206,12 @@ fn find_volume_by_id(dir: &Path, target_id: u32) -> EggResult<PathBuf> {
 
 /// Read split info (prev_id, next_id) from an EGG file's prefix section.
 fn read_split_info(file: &mut File) -> EggResult<Option<(u32, u32)>> {
+    file.seek(SeekFrom::Start(0)).map_err(EggError::Io)?;
+    let mut sig = [0u8; 4];
+    if file.read_exact(&mut sig).is_err() || u32::from_le_bytes(sig) != SIG_EGG_HEADER {
+        return Ok(None);
+    }
+
     file.seek(SeekFrom::Start(14)).map_err(EggError::Io)?;
 
     loop {
