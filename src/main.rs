@@ -10,10 +10,11 @@ use unegg::extract;
 use unegg::volume::MultiVolumeReader;
 
 const USAGE: &str = "\
-usage: unegg [-l] [-p] [-d DIR] [--pwd PASSWORD] <archive.egg | -> [files...]
+usage: unegg [-l] [-p] [-q] [-d DIR] [--pwd PASSWORD] <archive.egg | -> [files...]
 
   -l, --list      list archive contents
   -p              extract to stdout (pipe)
+  -q, --quiet     suppress progress messages
   -d DIR          output directory (default: .)
   --pwd PASSWORD  decryption password
   -h, --help      show this help
@@ -22,6 +23,7 @@ usage: unegg [-l] [-p] [-d DIR] [--pwd PASSWORD] <archive.egg | -> [files...]
 struct Cli {
     list: bool,
     pipe: bool,
+    quiet: bool,
     dest_dir: Option<String>,
     password: Option<String>,
     archive: String,
@@ -31,6 +33,7 @@ struct Cli {
 fn parse_args() -> Result<Cli, String> {
     let mut list = false;
     let mut pipe = false;
+    let mut quiet = false;
     let mut dest_dir = None;
     let mut password = None;
     let mut positional: Vec<String> = Vec::new();
@@ -45,6 +48,7 @@ fn parse_args() -> Result<Cli, String> {
         match arg.as_str() {
             "-l" | "--list" => list = true,
             "-p" => pipe = true,
+            "-q" | "--quiet" => quiet = true,
             "-d" => dest_dir = Some(args.next().ok_or("-d requires a directory")?),
             "--pwd" => password = Some(args.next().ok_or("--pwd requires a password")?),
             "-h" | "--help" => {
@@ -70,6 +74,7 @@ fn parse_args() -> Result<Cli, String> {
     Ok(Cli {
         list,
         pipe,
+        quiet,
         dest_dir,
         password,
         archive,
@@ -107,7 +112,7 @@ fn run(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(mvr) = MultiVolumeReader::try_open(path)? {
         let vol_count = mvr.volume_count();
         let mut archive = EggArchive::open(mvr)?;
-        if !cli.pipe {
+        if !cli.quiet && !cli.pipe {
             eprintln!("split archive: {vol_count} volumes");
         }
         return run_archive(&mut archive, cli);
@@ -149,7 +154,7 @@ fn run_archive<R: Read + Seek>(
         extract::extract_files(archive, &dest_dir, password, pipe_mode, &cli.files)?;
     }
 
-    if !pipe_mode {
+    if !cli.quiet && !pipe_mode {
         eprintln!("extracted {} entries", archive.entries.len());
     }
     Ok(())
