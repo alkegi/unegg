@@ -35,3 +35,7 @@ cat archive.egg | unegg -l -      # read from stdin
 ### Archive types
 - Solid archives (continuous compressed stream across files)
 - Split (multi-volume) archives (automatic volume discovery)
+
+## Docs
+
+[https://github.com/alkegi/docs](https://github.com/alkegi/docs)
