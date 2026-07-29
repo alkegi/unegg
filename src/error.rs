@@ -51,6 +51,18 @@ impl fmt::Display for EggError {
     }
 }
 
+impl EggError {
+    /// True when this ultimately came from writing to a closed pipe, whichever
+    /// I/O-carrying variant wrapped it.
+    pub fn is_broken_pipe(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(e) | Self::CantOpenFile(e) | Self::CantOpenDestFile(e)
+            if e.kind() == std::io::ErrorKind::BrokenPipe
+        )
+    }
+}
+
 impl std::error::Error for EggError {}
 
 impl From<std::io::Error> for EggError {
