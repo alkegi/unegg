@@ -199,9 +199,11 @@ impl<R: Read + Seek> EggArchive<R> {
             let sig = read_u32(&mut reader)?;
             match sig {
                 SIG_SPLIT_INFO => {
-                    let (_flags, _size) = read_extra_field(&mut reader)?;
+                    let (_flags, size) = read_extra_field(&mut reader)?;
                     let prev_id = read_u32(&mut reader)?;
                     let next_id = read_u32(&mut reader)?;
+                    // Honor the declared size so extra bytes don't desync parsing.
+                    skip(&mut reader, (size as u64).saturating_sub(8))?;
                     split_info = Some(SplitInfo { prev_id, next_id });
                 }
                 SIG_SOLID_INFO => {
@@ -210,9 +212,8 @@ impl<R: Read + Seek> EggArchive<R> {
                     is_solid = true;
                 }
                 SIG_SKIP => {
-                    let (_flags, _size) = read_extra_field(&mut reader)?;
-                    let _prev_id = read_u32(&mut reader)?;
-                    let _next_id = read_u32(&mut reader)?;
+                    let (_flags, size) = read_extra_field(&mut reader)?;
+                    skip(&mut reader, size as u64)?;
                 }
                 SIG_GLOBAL_ENCRYPT => {
                     let (_flags, size) = read_extra_field(&mut reader)?;
