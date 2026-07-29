@@ -8,3 +8,7 @@ All test data in this directory is dedicated to the public domain under
 
 More encrypted samples for manual testing (password `jtr`):
 [openwall/john-samples](https://github.com/openwall/john-samples/tree/main/ALZip).
+
+`solid.egg` is the only sample here in the solid format (one shared compressed
+stream); `solid_low` and `solid_max` are named after compression presets and are
+not solid.

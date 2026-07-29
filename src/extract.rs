@@ -287,9 +287,9 @@ pub fn extract_files<R: Read + Seek>(
 
 /// Solid archive extraction. The blocks form one continuous compressed stream
 /// (decompressor state carries across block boundaries), so it is decompressed
-/// as a unit — but instead of buffering the whole output in RAM, it is streamed
-/// through `SolidSink`, which routes each block's bytes to its file and verifies
-/// per-block CRC as bytes arrive. Peak memory stays at the codec working set.
+/// as a unit and streamed through `SolidSink`, which routes each block's bytes
+/// to its file and verifies per-block CRC as bytes arrive. The decompressed
+/// output is not held in RAM; the compressed input is.
 fn extract_all_solid<R: Read + Seek>(
     archive: &mut EggArchive<R>,
     entries: &[EggFileEntry],
@@ -298,15 +298,19 @@ fn extract_all_solid<R: Read + Seek>(
     pipe_mode: bool,
     filter: Option<&[String]>,
 ) -> EggResult<()> {
-    struct SolidBlock {
+    struct BlockRead {
         file_idx: usize,
-        uncompressed_size: u32,
         compressed_size: u32,
-        crc32: u32,
         data_pos: u64,
     }
 
-    let mut solid_blocks: Vec<SolidBlock> = Vec::new();
+    // The solid stream is tiled two ways: output by entry (each file takes its
+    // own uncompressed_size) and integrity by block (each block's own size + CRC,
+    // one block spanning the whole group). Conflating them drops files that own
+    // no block.
+    let mut file_spans: Vec<(usize, u64)> = Vec::new();
+    let mut crc_spans: Vec<(u64, u32)> = Vec::new();
+    let mut block_reads: Vec<BlockRead> = Vec::new();
 
     for (fi, entry) in entries.iter().enumerate() {
         if entry.is_directory() {
@@ -323,18 +327,18 @@ fn extract_all_solid<R: Read + Seek>(
         // cleanly before any decompression happens.
         let _ = safe_join(dest_dir, &entry.file_name)?;
 
+        file_spans.push((fi, entry.uncompressed_size));
         for block in &entry.blocks {
-            solid_blocks.push(SolidBlock {
+            crc_spans.push((block.uncompressed_size as u64, block.crc32));
+            block_reads.push(BlockRead {
                 file_idx: fi,
-                uncompressed_size: block.uncompressed_size,
                 compressed_size: block.compressed_size,
-                crc32: block.crc32,
                 data_pos: block.data_pos,
             });
         }
     }
 
-    if !solid_blocks.is_empty() {
+    if !block_reads.is_empty() {
         // Read and decrypt every block into one compressed buffer (bounded by the
         // archive's own size), maintaining per-file decryptor state and verifying
         // each encrypted file's AE-2 authentication footer.
@@ -342,19 +346,19 @@ fn extract_all_solid<R: Read + Seek>(
         let mut current_file_idx = usize::MAX;
         let mut crypto: Option<FileCrypto> = None;
 
-        for sb in &solid_blocks {
-            if sb.file_idx != current_file_idx {
-                current_file_idx = sb.file_idx;
-                crypto = setup_decryptor(&entries[sb.file_idx], password)?;
+        for br in &block_reads {
+            if br.file_idx != current_file_idx {
+                current_file_idx = br.file_idx;
+                crypto = setup_decryptor(&entries[br.file_idx], password)?;
                 if let Some(fc) = &crypto
                     && let Some(auth) = &fc.auth
                 {
-                    verify_hmac(&mut archive.reader, &entries[sb.file_idx], auth)?;
+                    verify_hmac(&mut archive.reader, &entries[br.file_idx], auth)?;
                 }
             }
 
-            archive.reader.seek(SeekFrom::Start(sb.data_pos))?;
-            let want = sb.compressed_size as u64;
+            archive.reader.seek(SeekFrom::Start(br.data_pos))?;
+            let want = br.compressed_size as u64;
             let mut buf = Vec::new();
             if (&mut archive.reader).take(want).read_to_end(&mut buf)? as u64 != want {
                 return Err(EggError::CorruptedFile);
@@ -372,16 +376,16 @@ fn extract_all_solid<R: Read + Seek>(
             .map(|b| b.compression_method)
             .unwrap_or(CompressionMethod::Store);
 
-        let total_uncompressed: u64 = solid_blocks
-            .iter()
-            .map(|b| b.uncompressed_size as u64)
-            .sum();
+        let total_uncompressed: u64 = crc_spans.iter().map(|(size, _)| *size).sum();
 
-        let blocks: Vec<(usize, u32, u32)> = solid_blocks
-            .iter()
-            .map(|b| (b.file_idx, b.uncompressed_size, b.crc32))
-            .collect();
-        let mut sink = SolidSink::new(&blocks, entries, dest_dir, filter, pipe_mode);
+        let mut sink = SolidSink::new(
+            &file_spans,
+            &crc_spans,
+            entries,
+            dest_dir,
+            filter,
+            pipe_mode,
+        );
 
         let mut cursor = Cursor::new(&all_compressed);
         let len = all_compressed.len() as u64;
@@ -416,23 +420,29 @@ fn extract_all_solid<R: Read + Seek>(
             CompressionMethod::Unknown(n) => return Err(EggError::UnknownCompressionMethod(n)),
         }
         sink.finish()?;
+    } else if !pipe_mode {
+        // A solid group with no data blocks at all: every regular entry is empty.
+        for &(fi, _) in &file_spans {
+            let entry = &entries[fi];
+            if !should_extract(entry, filter) {
+                continue;
+            }
+            let path = safe_join(dest_dir, &entry.file_name)?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(EggError::CantOpenDestFile)?;
+            }
+            fs::File::create(&path).map_err(EggError::CantOpenDestFile)?;
+        }
     }
 
-    // Create empty files for zero-block regular entries (never represented as
-    // solid blocks), and apply modification times.
+    // Apply modification times (the sink already created every file).
     if !pipe_mode {
         for entry in entries {
             if entry.is_directory() || !should_extract(entry, filter) {
                 continue;
             }
-            let path = safe_join(dest_dir, &entry.file_name)?;
-            if entry.blocks.is_empty() {
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(EggError::CantOpenDestFile)?;
-                }
-                fs::File::create(&path).map_err(EggError::CantOpenDestFile)?;
-            }
             if let Some(ft) = entry.file_time {
+                let path = safe_join(dest_dir, &entry.file_name)?;
                 set_file_time(&path, ft);
             }
         }
@@ -445,44 +455,56 @@ fn extract_all_solid<R: Read + Seek>(
 /// into individual files by block boundary, verifying each block's CRC32 as it
 /// completes and rejecting any output beyond the declared total (bomb guard).
 struct SolidSink<'a> {
-    blocks: &'a [(usize, u32, u32)], // (file_idx, uncompressed_size, crc32)
+    file_spans: &'a [(usize, u64)], // (file_idx, uncompressed_size), output tiling
+    crc_spans: &'a [(u64, u32)],    // (uncompressed_size, crc32), integrity tiling
     entries: &'a [EggFileEntry],
     dest_dir: &'a Path,
     filter: Option<&'a [String]>,
     pipe_mode: bool,
-    blk_idx: usize,
-    blk_written: u32,
-    hasher: crc32fast::Hasher,
-    cur_file_idx: usize,
+    file_idx: usize,
+    file_written: u64,
+    file_open: bool,
     writer: Option<Box<dyn Write>>,
+    crc_idx: usize,
+    crc_written: u64,
+    hasher: crc32fast::Hasher,
 }
 
 impl<'a> SolidSink<'a> {
     fn new(
-        blocks: &'a [(usize, u32, u32)],
+        file_spans: &'a [(usize, u64)],
+        crc_spans: &'a [(u64, u32)],
         entries: &'a [EggFileEntry],
         dest_dir: &'a Path,
         filter: Option<&'a [String]>,
         pipe_mode: bool,
     ) -> Self {
         SolidSink {
-            blocks,
+            file_spans,
+            crc_spans,
             entries,
             dest_dir,
             filter,
             pipe_mode,
-            blk_idx: 0,
-            blk_written: 0,
-            hasher: crc32fast::Hasher::new(),
-            cur_file_idx: usize::MAX,
+            file_idx: 0,
+            file_written: 0,
+            file_open: false,
             writer: None,
+            crc_idx: 0,
+            crc_written: 0,
+            hasher: crc32fast::Hasher::new(),
         }
     }
 
-    fn open_file(&mut self, file_idx: usize) -> io::Result<()> {
-        self.writer = None; // flush/close the previous file first
-        self.cur_file_idx = file_idx;
-        let entry = &self.entries[file_idx];
+    /// Create the current file span's output (once), so even zero-length files
+    /// are materialized.
+    fn ensure_file_open(&mut self) -> io::Result<()> {
+        if self.file_open {
+            return Ok(());
+        }
+        self.file_open = true;
+        let (fi, _) = self.file_spans[self.file_idx];
+        let entry = &self.entries[fi];
         if should_extract(entry, self.filter) {
             self.writer = if self.pipe_mode {
                 Some(Box::new(io::stdout()))
@@ -498,24 +520,31 @@ impl<'a> SolidSink<'a> {
         Ok(())
     }
 
-    /// Ensure the whole declared stream was produced (no truncation). Any
-    /// trailing zero-length blocks produce their (empty) files here, since no
-    /// bytes flow through `write` to complete them.
-    fn finish(mut self) -> EggResult<()> {
-        while let Some(&(file_idx, size, crc32)) = self.blocks.get(self.blk_idx) {
-            if size != 0 || self.blk_written != 0 {
+    /// Advance past any file spans that are already full (including zero-length
+    /// ones, which are created and closed without any bytes flowing through).
+    fn advance_full_files(&mut self) -> io::Result<()> {
+        while self.file_idx < self.file_spans.len() {
+            let (_, size) = self.file_spans[self.file_idx];
+            if self.file_written < size {
                 break;
             }
-            self.open_file(file_idx).map_err(EggError::Io)?;
-            if crc32 != crc32fast::hash(&[]) {
-                return Err(EggError::InvalidFileCrc {
-                    expected: crc32,
-                    got: crc32fast::hash(&[]),
-                });
-            }
-            self.blk_idx += 1;
+            self.ensure_file_open()?;
+            self.writer = None; // flush/close
+            self.file_idx += 1;
+            self.file_written = 0;
+            self.file_open = false;
         }
-        if self.blk_idx != self.blocks.len() || self.blk_written != 0 {
+        Ok(())
+    }
+
+    /// Ensure the whole declared stream was produced (no truncation), creating
+    /// any trailing zero-length files.
+    fn finish(mut self) -> EggResult<()> {
+        self.advance_full_files().map_err(EggError::Io)?;
+        if self.file_idx != self.file_spans.len()
+            || self.crc_idx != self.crc_spans.len()
+            || self.crc_written != 0
+        {
             return Err(EggError::CorruptedFile);
         }
         Ok(())
@@ -527,25 +556,36 @@ impl Write for SolidSink<'_> {
         let total = buf.len();
         let mut rest = buf;
         while !rest.is_empty() {
-            let Some(&(file_idx, size, crc32)) = self.blocks.get(self.blk_idx) else {
+            self.advance_full_files()?;
+            let Some(&(_, file_size)) = self.file_spans.get(self.file_idx) else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "solid output exceeds declared uncompressed size",
                 ));
             };
-            if file_idx != self.cur_file_idx {
-                self.open_file(file_idx)?;
-            }
-            let need = (size - self.blk_written) as usize;
-            let take = need.min(rest.len());
+            let Some(&(crc_size, crc32)) = self.crc_spans.get(self.crc_idx) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "solid output exceeds declared block size",
+                ));
+            };
+            self.ensure_file_open()?;
+
+            // Write the largest run bounded by both the current file span and the
+            // current CRC span, so file and integrity boundaries advance together.
+            let file_need = (file_size - self.file_written) as usize;
+            let crc_need = (crc_size - self.crc_written) as usize;
+            let take = rest.len().min(file_need).min(crc_need);
             let chunk = &rest[..take];
             self.hasher.update(chunk);
             if let Some(w) = self.writer.as_mut() {
                 w.write_all(chunk)?;
             }
-            self.blk_written += take as u32;
+            self.file_written += take as u64;
+            self.crc_written += take as u64;
             rest = &rest[take..];
-            if self.blk_written == size {
+
+            if self.crc_written == crc_size {
                 let crc = std::mem::replace(&mut self.hasher, crc32fast::Hasher::new()).finalize();
                 if crc != crc32 {
                     return Err(io::Error::new(
@@ -553,8 +593,8 @@ impl Write for SolidSink<'_> {
                         "solid block CRC mismatch",
                     ));
                 }
-                self.blk_idx += 1;
-                self.blk_written = 0;
+                self.crc_idx += 1;
+                self.crc_written = 0;
             }
         }
         Ok(total)
