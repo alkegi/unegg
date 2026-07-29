@@ -9,6 +9,10 @@ All test data in this directory is dedicated to the public domain under
 More encrypted samples for manual testing (password `jtr`):
 [openwall/john-samples](https://github.com/openwall/john-samples/tree/main/ALZip).
 
+`posix.egg` carries the Unix POSIX file-info header (mode/uid/gid/mtime); it was
+produced by the Android archiver app, the only build that writes EGG on a
+Unix-like system.
+
 `solid.egg` is the only sample here in the solid format (one shared compressed
 stream); `solid_low` and `solid_max` are named after compression presets and are
 not solid.

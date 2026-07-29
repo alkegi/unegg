@@ -84,6 +84,45 @@ fn test_real_low() {
     extract_and_verify(&format!("{EGG_DIR}/low.egg"), None);
 }
 
+// --- POSIX file info ---
+
+/// An archive written on Unix carries mode/uid/gid/mtime in a POSIX header
+/// instead of the Windows one, so the entry time has to come from there.
+#[test]
+fn test_real_posix_file_info() {
+    let egg = format!("{EGG_DIR}/posix.egg");
+    require(&egg);
+
+    let tmpdir = std::env::temp_dir().join("unegg_posix");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+
+    let file = std::fs::File::open(&egg).unwrap();
+    let mut archive = unegg::archive::EggArchive::open(file).unwrap();
+    assert_eq!(archive.entries.len(), 3);
+
+    // Every entry carries the same POSIX mtime (Unix seconds 1785088885) as
+    // FILETIME ticks, and none is a directory.
+    for entry in &archive.entries {
+        assert_eq!(entry.file_time, Some(134_295_624_850_000_000));
+        assert!(!entry.is_directory());
+    }
+
+    unegg::extract::extract_all(&mut archive, &tmpdir, None, false).unwrap();
+    let expected: &[(&str, u64, u32)] = &[
+        ("hello.txt", 25, 0x6c7b95e7),
+        ("notes.txt", 54, 0x96e10d03),
+        ("mydir/inner.txt", 19, 0xb3010a13),
+    ];
+    for (name, len, crc) in expected {
+        let data = std::fs::read(tmpdir.join(name)).unwrap();
+        assert_eq!(data.len() as u64, *len, "{name}: wrong length");
+        assert_eq!(crc32fast::hash(&data), *crc, "{name}: wrong CRC");
+    }
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
 // --- AZO ---
 
 /// The only real-file exercise of the AZO decoder (compression method 3);

@@ -21,6 +21,20 @@ const SIG_POSIX_FILE_INFO: u32 = 0x1EE922E5;
 
 pub const ATTR_DIRECTORY: u8 = 0x80;
 
+// POSIX mode bits, for the Unix-side file info header.
+const S_IFMT: u32 = 0xF000;
+const S_IFDIR: u32 = 0x4000;
+
+/// Seconds between the FILETIME epoch (1601) and the Unix epoch.
+const FILETIME_EPOCH_DIFF: u64 = 11_644_473_600;
+
+/// Unix seconds to the 100 ns FILETIME ticks the entry time is stored in.
+fn unix_to_filetime(unix_secs: u64) -> u64 {
+    unix_secs
+        .saturating_add(FILETIME_EPOCH_DIFF)
+        .saturating_mul(10_000_000)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionMethod {
     Store,
@@ -321,7 +335,24 @@ fn parse_file_entry<R: Read + Seek>(
             }
             SIG_POSIX_FILE_INFO => {
                 let (_flags, size) = read_extra_field(reader)?;
-                skip(reader, size as u64)?;
+                // mode (u32), uid (u32), gid (u32), then mtime as Unix seconds
+                // (u64). Archives written on Unix carry this instead of the
+                // Windows file info header.
+                if (size as usize) < 20 {
+                    return Err(EggError::CorruptedFile);
+                }
+                let mode = read_u32(reader)?;
+                let _uid = read_u32(reader)?;
+                let _gid = read_u32(reader)?;
+                let mtime = read_u64(reader)?;
+                skip(reader, size as u64 - 20)?;
+
+                if mode & S_IFMT == S_IFDIR {
+                    file_attr |= ATTR_DIRECTORY;
+                }
+                if file_time.is_none() {
+                    file_time = Some(unix_to_filetime(mtime));
+                }
             }
             SIG_ENCRYPT_INFO => {
                 let (_flags, size) = read_extra_field(reader)?;
