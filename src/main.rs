@@ -1,7 +1,7 @@
 //! `unegg`: command-line EGG archive extractor.
 
 use std::fs;
-use std::io::{self, BufReader, Read, Seek};
+use std::io::{self, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -129,7 +129,13 @@ fn run_archive<R: Read + Seek>(
     cli: &Cli,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if cli.list {
-        list_archive(archive);
+        // A closed pipe (`unegg -l big.egg | head`) is the reader's normal way
+        // of saying "enough", not a failure.
+        if let Err(e) = list_archive(archive)
+            && e.kind() != io::ErrorKind::BrokenPipe
+        {
+            return Err(e.into());
+        }
         return Ok(());
     }
 
@@ -180,13 +186,16 @@ fn prompt_password(
     Err(unegg::error::EggError::InvalidPassword.into())
 }
 
-fn list_archive<R: io::Read + io::Seek>(archive: &EggArchive<R>) {
+fn list_archive<R: io::Read + io::Seek>(archive: &EggArchive<R>) -> io::Result<()> {
     if archive.is_solid {
         eprintln!("[solid archive]");
     }
     if archive.split_info.is_some() {
         eprintln!("[split archive]");
     }
+
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
 
     for entry in &archive.entries {
         let method = if entry.blocks.is_empty() {
@@ -208,14 +217,16 @@ fn list_archive<R: io::Read + io::Seek>(archive: &EggArchive<R>) {
 
         let dir_marker = if entry.is_directory() { "D" } else { " " };
 
-        println!(
+        writeln!(
+            out,
             "{dir_marker}{enc} {size:>12}  {method:<7}  {time}  {name}",
             size = entry.uncompressed_size,
             method = method,
             time = time_str,
             name = entry.file_name,
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn format_filetime(filetime_val: u64) -> String {
