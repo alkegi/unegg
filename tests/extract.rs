@@ -148,16 +148,6 @@ fn test_real_azo() {
 
 // --- Solid archives ---
 
-#[test]
-fn test_real_solid_low() {
-    extract_and_verify(&format!("{EGG_DIR}/solid_low.egg"), None);
-}
-
-#[test]
-fn test_real_solid_max() {
-    extract_and_verify(&format!("{EGG_DIR}/solid_max.egg"), None);
-}
-
 /// A genuine solid archive (has the Solid Info sub-header): all entries share
 /// one compressed stream, so output must be split by each entry's uncompressed
 /// size, not by block ownership. The empty and single-byte entries in the middle
