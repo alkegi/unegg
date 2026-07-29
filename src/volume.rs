@@ -129,8 +129,10 @@ impl Read for MultiVolumeReader {
             }
 
             let seg = &mut self.segments[self.current];
-            let remaining = (seg.logical_start + seg.data_size - self.logical_pos) as usize;
-            let to_read = buf.len().min(remaining);
+            // Clamp in u64 before narrowing so a >4 GiB span cannot truncate to 0
+            // (a premature EOF) on a 32-bit target.
+            let remaining = seg.logical_start + seg.data_size - self.logical_pos;
+            let to_read = remaining.min(buf.len() as u64) as usize;
             let n = seg.file.read(&mut buf[..to_read])?;
             self.logical_pos += n as u64;
             return Ok(n);
