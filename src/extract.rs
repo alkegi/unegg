@@ -67,6 +67,11 @@ fn safe_join(dest: &Path, name: &str) -> EggResult<PathBuf> {
             }
         }
     }
+    // An entry with no usable name would resolve to the destination directory
+    // itself, and writing there would clobber it.
+    if out == dest {
+        return Err(EggError::CorruptedFile);
+    }
     Ok(out)
 }
 
@@ -682,6 +687,17 @@ mod tests {
         );
         // CurDir components are ignored.
         assert_eq!(safe_join(dest, "./a/./b").unwrap(), Path::new("/out/a/b"));
+    }
+
+    #[test]
+    fn safe_join_rejects_nameless_entry() {
+        let dest = Path::new("/out");
+        for name in ["", ".", "./."] {
+            assert!(
+                matches!(safe_join(dest, name), Err(EggError::CorruptedFile)),
+                "should reject {name:?}"
+            );
+        }
     }
 
     #[test]
