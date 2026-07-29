@@ -1,13 +1,9 @@
 use encoding_rs::{EUC_KR, SHIFT_JIS};
 
-/// Decode filename bytes with the given flags and raw data.
-/// flags bit 4: 0=UTF-8, 1=area code (locale-specific)
-/// If area code, locale_code selects encoding: 932=Shift-JIS, 949=EUC-KR, 0=system default.
-pub fn decode_filename(flags: u8, locale_code: Option<u16>, data: &[u8]) -> String {
-    let use_area_code = flags & 0x10 != 0;
-
+/// Decode filename bytes. Without the area-code flag the name is UTF-8; with it,
+/// `locale_code` selects a legacy code page (932=Shift-JIS, 949=EUC-KR).
+pub fn decode_filename(use_area_code: bool, locale_code: Option<u16>, data: &[u8]) -> String {
     if !use_area_code {
-        // UTF-8
         return String::from_utf8_lossy(data).into_owned();
     }
 
