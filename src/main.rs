@@ -166,7 +166,9 @@ fn prompt_password(
     entries: &[unegg::archive::EggFileEntry],
 ) -> Result<String, Box<dyn std::error::Error>> {
     for attempt in 1..=3 {
-        let pw = rpassword::prompt_password("Enter password: ")?;
+        // No TTY
+        let pw = rpassword::prompt_password("Enter password: ")
+            .map_err(|_| "password required (use --pwd)")?;
         if unegg::extract::verify_password(entries, &pw)? {
             return Ok(pw);
         }
