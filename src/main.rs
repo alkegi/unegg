@@ -92,6 +92,13 @@ fn main() {
     };
 
     if let Err(e) = run(&cli) {
+        // A reader closing the pipe (`unegg -p a.egg f | head`) is a normal stop.
+        if cli.pipe
+            && let Some(egg) = e.downcast_ref::<unegg::error::EggError>()
+            && egg.is_broken_pipe()
+        {
+            return;
+        }
         eprintln!("unegg: {e}");
         process::exit(1);
     }
