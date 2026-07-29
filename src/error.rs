@@ -6,7 +6,10 @@ pub enum EggError {
     CorruptedFile,
     CantOpenFile(std::io::Error),
     CantOpenDestFile(std::io::Error),
-    InvalidFileCrc { expected: u32, got: u32 },
+    InvalidFileCrc {
+        expected: u32,
+        got: u32,
+    },
     UnknownCompressionMethod(u8),
     UnsupportedEncryption(u8),
     PasswordNotSet,
@@ -17,6 +20,8 @@ pub enum EggError {
     InflateFailed(String),
     LzmaFailed(String),
     AzoFailed(String),
+    /// A name requested on the command line matched no entry.
+    FileNotFound(String),
     Io(std::io::Error),
 }
 
@@ -46,6 +51,7 @@ impl fmt::Display for EggError {
             Self::InflateFailed(e) => write!(f, "inflate failed: {e}"),
             Self::LzmaFailed(e) => write!(f, "LZMA failed: {e}"),
             Self::AzoFailed(e) => write!(f, "AZO failed: {e}"),
+            Self::FileNotFound(name) => write!(f, "file not found in archive: {name}"),
             Self::Io(e) => write!(f, "I/O error: {e}"),
         }
     }
