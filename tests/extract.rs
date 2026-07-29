@@ -119,6 +119,40 @@ fn test_real_solid_max() {
     extract_and_verify(&format!("{EGG_DIR}/solid_max.egg"), None);
 }
 
+/// A genuine solid archive (has the Solid Info sub-header): all entries share
+/// one compressed stream, so output must be split by each entry's uncompressed
+/// size, not by block ownership. The empty and single-byte entries in the middle
+/// exercise the entry/block tiling boundaries.
+#[test]
+fn test_real_solid() {
+    let egg = format!("{EGG_DIR}/solid.egg");
+    require(&egg);
+    let tmpdir = std::env::temp_dir().join("unegg_solid");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+
+    let file = std::fs::File::open(&egg).unwrap();
+    let mut archive = unegg::archive::EggArchive::open(file).unwrap();
+    assert!(archive.is_solid, "sample should be a solid archive");
+
+    unegg::extract::extract_all(&mut archive, &tmpdir, None, false).unwrap();
+
+    let expected: &[(&str, u64, u32)] = &[
+        ("a", 1, 0xe8b7be43),
+        ("empty.txt", 0, 0x00000000),
+        ("hello.txt", 45, 0xeb50cc6a),
+        ("lorem.txt", 2200, 0xcc0c6d8d),
+        ("random.bin", 4096, 0xb4c1d904),
+    ];
+    for (name, len, crc) in expected {
+        let data = std::fs::read(tmpdir.join(name)).unwrap();
+        assert_eq!(data.len() as u64, *len, "{name}: wrong length");
+        assert_eq!(crc32fast::hash(&data), *crc, "{name}: wrong CRC");
+    }
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
 // --- Encryption ---
 
 #[test]
