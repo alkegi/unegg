@@ -330,7 +330,9 @@ fn parse_file_entry<R: Read + Seek>(
                     return Err(EggError::CorruptedFile);
                 }
                 file_time = Some(read_u64(reader)?);
-                file_attr = read_u8(reader)?;
+                // OR in, so the flag is order-independent if a POSIX header (the
+                // other producer of file_attr) also appears on the same entry.
+                file_attr |= read_u8(reader)?;
                 skip(reader, size as u64 - 9)?;
             }
             SIG_POSIX_FILE_INFO => {
