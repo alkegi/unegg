@@ -84,6 +84,29 @@ fn test_real_low() {
     extract_and_verify(&format!("{EGG_DIR}/low.egg"), None);
 }
 
+// --- AZO ---
+
+/// The only real-file exercise of the AZO decoder (compression method 3);
+/// producers emit AZO for a narrow set of inputs.
+#[test]
+fn test_real_azo() {
+    let egg = format!("{EGG_DIR}/azo.egg");
+    require(&egg);
+    let tmpdir = std::env::temp_dir().join("unegg_real_azo");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+
+    let file = std::fs::File::open(&egg).unwrap();
+    let mut archive = unegg::archive::EggArchive::open(file).unwrap();
+    unegg::extract::extract_all(&mut archive, &tmpdir, None, false).unwrap();
+
+    let data = std::fs::read(tmpdir.join("azo_fix.sys")).unwrap();
+    assert_eq!(data.len(), 1602);
+    assert_eq!(crc32fast::hash(&data), 0x4a2ab0d2);
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
 // --- Solid archives ---
 
 #[test]
