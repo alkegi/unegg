@@ -136,7 +136,7 @@ fn run_archive<R: Read + Seek>(
     let dest_dir = PathBuf::from(cli.dest_dir.as_deref().unwrap_or("."));
     let pipe_mode = cli.pipe;
 
-    // Prompt for a password (like unzip/7zip) when the archive is encrypted and
+    // Prompt for a password when the archive is encrypted and
     // none was given on the command line. `prompted` owns it for the borrow.
     let prompted: String;
     let password: Option<&str> = if let Some(p) = cli.password.as_deref() {
