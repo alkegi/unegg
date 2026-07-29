@@ -612,8 +612,11 @@ impl Write for SolidSink<'_> {
 
             // Write the largest run bounded by both the current file span and the
             // current CRC span, so file and integrity boundaries advance together.
-            let file_need = (file_size - self.file_written) as usize;
-            let crc_need = (crc_size - self.crc_written) as usize;
+            // Clamp in u64 before narrowing so a >4 GiB span cannot truncate to 0
+            // (which would stall the loop) on a 32-bit target.
+            let rest_len = rest.len() as u64;
+            let file_need = (file_size - self.file_written).min(rest_len) as usize;
+            let crc_need = (crc_size - self.crc_written).min(rest_len) as usize;
             let take = rest.len().min(file_need).min(crc_need);
             let chunk = &rest[..take];
             self.hasher.update(chunk);
