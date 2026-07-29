@@ -123,6 +123,47 @@ fn test_real_lea256() {
     extract_and_verify(&format!("{EGG_DIR}/lea256.egg"), Some(PASSWORD));
 }
 
+// --- Encrypt sub-headers with an overstated size ---
+//
+// These archives declare the encrypt sub-header 7 bytes longer than it is (the
+// count reaches into the trailing end marker), which desyncs a reader that
+// trusts the field. They pin the end-marker-anchored payload reader.
+
+fn extract_oversized_encrypt(egg_path: &str) {
+    require(egg_path);
+    let tmpdir = std::env::temp_dir().join(format!(
+        "unegg_oversized_{}",
+        Path::new(egg_path).file_stem().unwrap().to_str().unwrap()
+    ));
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+
+    let file = std::fs::File::open(egg_path).unwrap();
+    let mut archive = unegg::archive::EggArchive::open(file).unwrap();
+    unegg::extract::extract_all(&mut archive, &tmpdir, Some(PASSWORD), false).unwrap();
+
+    let data = std::fs::read(tmpdir.join("fix.txt")).unwrap();
+    assert_eq!(data.len(), 44);
+    assert_eq!(crc32fast::hash(&data), 0x71fdb873);
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
+fn test_oversized_encrypt_zip20() {
+    extract_oversized_encrypt(&format!("{EGG_DIR}/oversized_encrypt_zip20.egg"));
+}
+
+#[test]
+fn test_oversized_encrypt_aes128() {
+    extract_oversized_encrypt(&format!("{EGG_DIR}/oversized_encrypt_aes128.egg"));
+}
+
+#[test]
+fn test_oversized_encrypt_aes256() {
+    extract_oversized_encrypt(&format!("{EGG_DIR}/oversized_encrypt_aes256.egg"));
+}
+
 // --- Split archive ---
 
 #[test]

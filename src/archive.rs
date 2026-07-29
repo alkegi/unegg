@@ -93,6 +93,18 @@ impl EncryptionMethod {
             Self::Unknown(_) => "Unknown",
         }
     }
+
+    /// Byte lengths the crypto payload can take, longest first. ZipCrypto is a
+    /// 12-byte verifier plus a 4-byte CRC; AES/LEA are salt + 2-byte verifier,
+    /// optionally followed by a 10-byte AE-2 HMAC.
+    fn payload_lengths(&self) -> &'static [usize] {
+        match self {
+            Self::ZipCrypto => &[16],
+            Self::Aes128 | Self::Lea128 => &[20, 10],
+            Self::Aes256 | Self::Lea256 => &[28, 18],
+            Self::Unknown(_) => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -285,9 +297,8 @@ fn parse_file_entry<R: Read + Seek>(
                 let name_buf = read_exact_capped(reader, remaining)?;
 
                 // Bit 3: the filename bytes are encrypted. Decryption needs the
-                // password, which is not available at parse time, and no known
-                // producer emits this (the spec notes flags are always 0x00 in
-                // practice), so the name is decoded best-effort as-is.
+                // password, which is not available at parse time, and no sample
+                // observed sets it, so the name is decoded best-effort as-is.
                 let _ = is_encrypted_name;
 
                 let decoded = encoding::decode_filename(flags, locale_code, &name_buf);
@@ -320,13 +331,12 @@ fn parse_file_entry<R: Read + Seek>(
                     return Err(EggError::CorruptedFile);
                 }
                 let method_byte = read_u8(reader)?;
-                let data_len = (size as usize) - 1;
-                let data = read_exact_capped(reader, data_len)?;
-
                 let method = EncryptionMethod::from_byte(method_byte);
                 if let EncryptionMethod::Unknown(n) = method {
                     return Err(EggError::UnsupportedEncryption(n));
                 }
+                let declared = (size as usize).saturating_sub(1);
+                let data = read_encrypt_payload(reader, method, declared)?;
                 *is_encrypted = true;
                 encrypt_info = Some(EncryptInfo { method, data });
             }
@@ -429,6 +439,27 @@ fn parse_block<R: Read + Seek>(reader: &mut R) -> EggResult<EggBlock> {
     })
 }
 
+/// Read an encryption sub-header's crypto payload. Some producers overstate the
+/// declared size, so the length is chosen to land on the following end marker
+/// (the encrypt sub-header is always the last one). `declared` (size minus the
+/// method byte) is the fallback when no fixed length fits.
+fn read_encrypt_payload<R: Read + Seek>(
+    reader: &mut R,
+    method: EncryptionMethod,
+    declared: usize,
+) -> EggResult<Vec<u8>> {
+    let start = reader.stream_position()?;
+    for &len in method.payload_lengths() {
+        reader.seek(SeekFrom::Start(start + len as u64))?;
+        let follows_end_marker = matches!(read_u32(reader), Ok(sig) if sig == SIG_END_MARKER);
+        reader.seek(SeekFrom::Start(start))?;
+        if follows_end_marker {
+            return read_exact_capped(reader, len);
+        }
+    }
+    read_exact_capped(reader, declared)
+}
+
 /// Read the extra field prefix: flags byte + size (u16 or u32).
 fn read_extra_field<R: Read>(reader: &mut R) -> EggResult<(u8, u32)> {
     let flags = read_u8(reader)?;
@@ -501,5 +532,38 @@ mod tests {
             read_exact_capped(&mut c, 1 << 30),
             Err(EggError::CorruptedFile)
         ));
+    }
+
+    /// Build `<payload><end marker>` and read it back with a given declared size.
+    fn payload_case(method: EncryptionMethod, payload: &[u8], declared: usize) -> Vec<u8> {
+        let mut buf = payload.to_vec();
+        buf.extend_from_slice(&SIG_END_MARKER.to_le_bytes());
+        buf.extend_from_slice(&[0x13, 0x0c, 0xb5]); // start of the next block magic
+        let mut c = Cursor::new(buf);
+        read_encrypt_payload(&mut c, method, declared).unwrap()
+    }
+
+    #[test]
+    fn encrypt_payload_trusts_end_marker_over_declared_size() {
+        // AES-128 with the 10-byte HMAC footer: 8 salt + 2 verifier + 10 mac.
+        let full = [0xABu8; 20];
+        // An overstated size (here 7 too many) must still stop at 20.
+        assert_eq!(payload_case(EncryptionMethod::Aes128, &full, 27), full);
+        assert_eq!(payload_case(EncryptionMethod::Aes128, &full, 20), full);
+    }
+
+    #[test]
+    fn encrypt_payload_handles_missing_hmac_footer() {
+        // A producer that omits the AE-2 footer leaves only 8 salt + 2 verifier.
+        let short = [0xCDu8; 10];
+        assert_eq!(payload_case(EncryptionMethod::Aes128, &short, 10), short);
+    }
+
+    #[test]
+    fn encrypt_payload_zipcrypto_fixed_length() {
+        // ZipCrypto is always 12-byte verifier + 4-byte CRC, whatever the
+        // declared size says.
+        let z = [0x5Au8; 16];
+        assert_eq!(payload_case(EncryptionMethod::ZipCrypto, &z, 23), z);
     }
 }
