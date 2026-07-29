@@ -14,5 +14,4 @@ produced by the Android archiver app, the only build that writes EGG on a
 Unix-like system.
 
 `solid.egg` is the only sample here in the solid format (one shared compressed
-stream); `solid_low` and `solid_max` are named after compression presets and are
-not solid.
+stream).
