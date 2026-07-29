@@ -448,7 +448,11 @@ fn extract_all_solid<R: Read + Seek>(
             return Err(e);
         }
     } else if !pipe_mode {
-        // A solid group with no data blocks at all: every regular entry is empty.
+        // A solid group with no data blocks at all: every regular entry must be
+        // empty, so a nonzero declared size means the blocks were lost.
+        if file_spans.iter().any(|&(_, size)| size != 0) {
+            return Err(EggError::CorruptedFile);
+        }
         for &(fi, _) in &file_spans {
             let entry = &entries[fi];
             if !should_extract(entry, filter) {
