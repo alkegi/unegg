@@ -10,13 +10,25 @@ EGG archive extractor written in Rust.
 
 ```
 unegg archive.egg                 # extract all files
-unegg archive.egg file.txt        # extract specific file
-unegg -d output/ archive.egg      # extract to directory
-unegg --pwd SECRET archive.egg    # extract encrypted archive
+unegg archive.egg file.txt        # extract a specific file
+unegg -d output/ archive.egg      # extract into a directory
+unegg -P SECRET archive.egg       # extract an encrypted archive
 unegg -l archive.egg              # list contents
 unegg -p archive.egg file.txt     # extract to stdout
 cat archive.egg | unegg -l -      # read from stdin
 ```
+
+| Option | | Description |
+|--------|--|-------------|
+| `-l` | `--list` | list contents instead of extracting |
+| `-d` | `--output-dir DIR` | extract into DIR (default: current directory) |
+| `-p` | `--pipe` | extract to stdout |
+| `-P` | `--password PW` | decryption password |
+| `-q` | `--quiet` | suppress progress messages |
+| `-h` | `--help` | show help and exit |
+| `-V` | `--version` | show version and exit |
+
+Short flags bundle (`-lq`). See [`unegg.1`](man/unegg.1) for the man page.
 
 ## Supported Features
 

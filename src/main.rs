@@ -10,15 +10,20 @@ use unegg::extract;
 use unegg::volume::MultiVolumeReader;
 
 const USAGE: &str = "\
-usage: unegg [-l] [-p] [-q] [-d DIR] [--pwd PASSWORD] <archive.egg | -> [files...]
+Usage: unegg [OPTION]... ARCHIVE [FILE]...
+       unegg [OPTION]... - [FILE]...
 
-  -l, --list      list archive contents
-  -p              extract to stdout (pipe)
-  -q, --quiet     suppress progress messages
-  -d DIR          output directory (default: .)
-  --pwd PASSWORD  decryption password
-  -h, --help      show this help
-  -V, --version   show version";
+Extract or list an EGG archive. With no FILE, every entry is extracted.
+
+  -l, --list            list contents instead of extracting
+  -d, --output-dir DIR  extract into DIR (default: current directory)
+  -p, --pipe            extract to stdout
+  -P, --password PW     decryption password
+  -q, --quiet           suppress progress messages
+  -h, --help            show this help and exit
+  -V, --version         show version and exit
+
+Use -- to end option parsing; a lone - reads the archive from stdin.";
 
 struct Cli {
     list: bool,
@@ -30,6 +35,11 @@ struct Cli {
     files: Vec<String>,
 }
 
+fn version() -> ! {
+    println!("unegg {}", env!("CARGO_PKG_VERSION"));
+    process::exit(0);
+}
+
 fn parse_args() -> Result<Cli, String> {
     let mut list = false;
     let mut pipe = false;
@@ -37,33 +47,70 @@ fn parse_args() -> Result<Cli, String> {
     let mut dest_dir = None;
     let mut password = None;
     let mut positional: Vec<String> = Vec::new();
-    let mut rest_positional = false;
+    let mut options_done = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        if rest_positional {
+        if options_done || arg == "-" || !arg.starts_with('-') {
             positional.push(arg);
-            continue;
-        }
-        match arg.as_str() {
-            "-l" | "--list" => list = true,
-            "-p" => pipe = true,
-            "-q" | "--quiet" => quiet = true,
-            "-d" => dest_dir = Some(args.next().ok_or("-d requires a directory")?),
-            "--pwd" => password = Some(args.next().ok_or("--pwd requires a password")?),
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                process::exit(0);
+        } else if arg == "--" {
+            options_done = true;
+        } else if let Some(long) = arg.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((n, v)) => (n, Some(v.to_string())),
+                None => (long, None),
+            };
+            let mut value = |what: &str| {
+                inline.clone().map_or_else(
+                    || args.next().ok_or(format!("--{name} requires {what}")),
+                    Ok,
+                )
+            };
+            match name {
+                "list" => list = true,
+                "pipe" => pipe = true,
+                "quiet" => quiet = true,
+                "output-dir" => dest_dir = Some(value("a directory")?),
+                "password" => password = Some(value("a password")?),
+                "help" => {
+                    println!("{USAGE}");
+                    process::exit(0);
+                }
+                "version" => version(),
+                _ => return Err(format!("unknown option: --{name}")),
             }
-            "-V" | "--version" => {
-                println!("unegg {}", env!("CARGO_PKG_VERSION"));
-                process::exit(0);
+        } else {
+            // Short-option cluster: -lq, -dDIR, -d DIR, -P PW, ...
+            let chars: Vec<char> = arg[1..].chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                match chars[i] {
+                    'l' => list = true,
+                    'p' => pipe = true,
+                    'q' => quiet = true,
+                    'h' => {
+                        println!("{USAGE}");
+                        process::exit(0);
+                    }
+                    'V' => version(),
+                    opt @ ('d' | 'P') => {
+                        let rest: String = chars[i + 1..].iter().collect();
+                        let val = if rest.is_empty() {
+                            args.next().ok_or(format!("-{opt} requires an argument"))?
+                        } else {
+                            rest
+                        };
+                        if opt == 'd' {
+                            dest_dir = Some(val);
+                        } else {
+                            password = Some(val);
+                        }
+                        break;
+                    }
+                    c => return Err(format!("unknown option: -{c}")),
+                }
+                i += 1;
             }
-            "--" => rest_positional = true,
-            s if s.starts_with("--pwd=") => password = Some(s["--pwd=".len()..].to_string()),
-            s if s.starts_with("-d") && s.len() > 2 => dest_dir = Some(s[2..].to_string()),
-            s if s != "-" && s.starts_with('-') => return Err(format!("unknown option: {s}")),
-            _ => positional.push(arg),
         }
     }
 
@@ -181,7 +228,7 @@ fn prompt_password(
     for attempt in 1..=3 {
         // No TTY
         let pw = rpassword::prompt_password("Enter password: ")
-            .map_err(|_| "password required (use --pwd)")?;
+            .map_err(|_| "password required (use --password)")?;
         if unegg::extract::verify_password(entries, &pw)? {
             return Ok(pw);
         }
