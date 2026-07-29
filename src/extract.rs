@@ -180,7 +180,12 @@ pub fn extract_entry<R: Read + Seek>(
         return Ok(());
     }
 
-    if entry.uncompressed_size == 0 && entry.blocks.is_empty() {
+    if entry.blocks.is_empty() {
+        // No blocks with a zero size is a legitimate empty file; a nonzero size
+        // means the block headers were lost, so refuse rather than write 0 bytes.
+        if entry.uncompressed_size != 0 {
+            return Err(EggError::CorruptedFile);
+        }
         if !pipe_mode {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(EggError::CantOpenDestFile)?;
