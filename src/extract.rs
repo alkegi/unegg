@@ -399,37 +399,45 @@ fn extract_all_solid<R: Read + Seek>(
 
         let mut cursor = Cursor::new(&all_compressed);
         let len = all_compressed.len() as u64;
-        match method {
-            CompressionMethod::Store => {
-                io::copy(&mut cursor, &mut sink).map_err(EggError::Io)?;
+        let outcome = (|| -> EggResult<()> {
+            match method {
+                CompressionMethod::Store => {
+                    io::copy(&mut cursor, &mut sink).map_err(EggError::Io)?;
+                }
+                CompressionMethod::Deflate => {
+                    decompress::deflate::extract_deflate(&mut cursor, &mut sink, len, None)?;
+                }
+                CompressionMethod::Bzip2 => {
+                    decompress::bzip2::extract_bzip2(&mut cursor, &mut sink, len, None)?;
+                }
+                CompressionMethod::Lzma => {
+                    decompress::lzma::extract_lzma(
+                        &mut cursor,
+                        &mut sink,
+                        len,
+                        total_uncompressed,
+                        None,
+                    )?;
+                }
+                CompressionMethod::Azo => {
+                    decompress::azo::extract_azo(
+                        &mut cursor,
+                        &mut sink,
+                        len,
+                        total_uncompressed,
+                        None,
+                    )?;
+                }
+                CompressionMethod::Unknown(n) => return Err(EggError::UnknownCompressionMethod(n)),
             }
-            CompressionMethod::Deflate => {
-                decompress::deflate::extract_deflate(&mut cursor, &mut sink, len, None)?;
+            sink.finish()
+        })();
+        if let Err(e) = outcome {
+            if !pipe_mode {
+                sink.cleanup();
             }
-            CompressionMethod::Bzip2 => {
-                decompress::bzip2::extract_bzip2(&mut cursor, &mut sink, len, None)?;
-            }
-            CompressionMethod::Lzma => {
-                decompress::lzma::extract_lzma(
-                    &mut cursor,
-                    &mut sink,
-                    len,
-                    total_uncompressed,
-                    None,
-                )?;
-            }
-            CompressionMethod::Azo => {
-                decompress::azo::extract_azo(
-                    &mut cursor,
-                    &mut sink,
-                    len,
-                    total_uncompressed,
-                    None,
-                )?;
-            }
-            CompressionMethod::Unknown(n) => return Err(EggError::UnknownCompressionMethod(n)),
+            return Err(e);
         }
-        sink.finish()?;
     } else if !pipe_mode {
         // A solid group with no data blocks at all: every regular entry is empty.
         for &(fi, _) in &file_spans {
@@ -478,6 +486,7 @@ struct SolidSink<'a> {
     crc_idx: usize,
     crc_written: u64,
     hasher: crc32fast::Hasher,
+    created: Vec<PathBuf>,
 }
 
 impl<'a> SolidSink<'a> {
@@ -503,6 +512,15 @@ impl<'a> SolidSink<'a> {
             crc_idx: 0,
             crc_written: 0,
             hasher: crc32fast::Hasher::new(),
+            created: Vec::new(),
+        }
+    }
+
+    /// Remove every file this sink created, so a mid-stream failure (a bad CRC,
+    /// a truncated stream) leaves nothing partial on disk.
+    fn cleanup(&self) {
+        for path in &self.created {
+            let _ = fs::remove_file(path);
         }
     }
 
@@ -524,7 +542,9 @@ impl<'a> SolidSink<'a> {
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                Some(Box::new(fs::File::create(&path)?))
+                let file = fs::File::create(&path)?;
+                self.created.push(path);
+                Some(Box::new(file))
             };
         }
         Ok(())
@@ -549,7 +569,7 @@ impl<'a> SolidSink<'a> {
 
     /// Ensure the whole declared stream was produced (no truncation), creating
     /// any trailing zero-length files.
-    fn finish(mut self) -> EggResult<()> {
+    fn finish(&mut self) -> EggResult<()> {
         self.advance_full_files().map_err(EggError::Io)?;
         if self.file_idx != self.file_spans.len()
             || self.crc_idx != self.crc_spans.len()
