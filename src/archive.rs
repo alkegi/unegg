@@ -21,6 +21,12 @@ const SIG_POSIX_FILE_INFO: u32 = 0x1EE922E5;
 
 pub const ATTR_DIRECTORY: u8 = 0x80;
 
+// Filename sub-header flag bits: 0x04 encrypted, 0x08 area-code, 0x10 relative
+// path. Bit 0x01 is the size-field width, consumed by `read_extra_field`.
+const FN_ENCRYPTED: u8 = 0x04;
+const FN_AREA_CODE: u8 = 0x08;
+const FN_RELATIVE: u8 = 0x10;
+
 // POSIX mode bits, for the Unix-side file info header.
 const S_IFMT: u32 = 0xF000;
 const S_IFDIR: u32 = 0x4000;
@@ -289,9 +295,9 @@ fn parse_file_entry<R: Read + Seek>(
             SIG_FILENAME => {
                 let (flags, size) = read_extra_field(reader)?;
                 let mut remaining = size as usize;
-                let use_area_code = flags & 0x10 != 0;
-                let is_relative = flags & 0x20 != 0;
-                let is_encrypted_name = flags & 0x08 != 0;
+                let use_area_code = flags & FN_AREA_CODE != 0;
+                let is_relative = flags & FN_RELATIVE != 0;
+                let is_encrypted_name = flags & FN_ENCRYPTED != 0;
 
                 let locale_code = if use_area_code {
                     let lc = read_u16(reader)?;
@@ -315,7 +321,7 @@ fn parse_file_entry<R: Read + Seek>(
                 // observed sets it, so the name is decoded best-effort as-is.
                 let _ = is_encrypted_name;
 
-                let decoded = encoding::decode_filename(flags, locale_code, &name_buf);
+                let decoded = encoding::decode_filename(use_area_code, locale_code, &name_buf);
                 file_name = encoding::normalize_path(&decoded);
             }
             SIG_COMMENT => {
