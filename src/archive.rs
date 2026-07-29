@@ -480,11 +480,21 @@ fn read_encrypt_payload<R: Read + Seek>(
     declared: usize,
 ) -> EggResult<Vec<u8>> {
     let start = reader.stream_position()?;
-    for &len in method.payload_lengths() {
+    let mut lands_on_end_marker = |len: usize| -> EggResult<bool> {
         reader.seek(SeekFrom::Start(start + len as u64))?;
-        let follows_end_marker = matches!(read_u32(reader), Ok(sig) if sig == SIG_END_MARKER);
+        let ok = matches!(read_u32(reader), Ok(sig) if sig == SIG_END_MARKER);
         reader.seek(SeekFrom::Start(start))?;
-        if follows_end_marker {
+        Ok(ok)
+    };
+    let candidates = method.payload_lengths();
+    // Trust the declared size when it is itself a valid payload length and lands
+    // on the end marker; only overstated sizes fall through to the fixed
+    // candidates, so a correct short payload is never mistaken for a longer one.
+    if candidates.contains(&declared) && lands_on_end_marker(declared)? {
+        return read_exact_capped(reader, declared);
+    }
+    for &len in candidates {
+        if lands_on_end_marker(len)? {
             return read_exact_capped(reader, len);
         }
     }
