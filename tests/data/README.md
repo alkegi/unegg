@@ -5,3 +5,6 @@ password `test1234`.
 
 All test data in this directory is dedicated to the public domain under
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+More encrypted samples for manual testing (password `jtr`):
+[openwall/john-samples](https://github.com/openwall/john-samples/tree/main/ALZip).
