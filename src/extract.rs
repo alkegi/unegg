@@ -276,6 +276,12 @@ pub fn extract_files<R: Read + Seek>(
     files: &[String],
 ) -> EggResult<()> {
     let entries: Vec<EggFileEntry> = archive.entries.clone();
+    // Names the caller asked for that correspond to no entry at all.
+    let unmatched: Option<String> = files
+        .iter()
+        .find(|f| !entries.iter().any(|e| matches_filter(&e.file_name, f)))
+        .cloned();
+
     if archive.is_solid {
         extract_all_solid(
             archive,
@@ -284,14 +290,17 @@ pub fn extract_files<R: Read + Seek>(
             password,
             pipe_mode,
             Some(files),
-        )
+        )?;
     } else {
         for entry in &entries {
             if should_extract(entry, Some(files)) {
                 extract_entry(archive, entry, dest_dir, password, pipe_mode)?;
             }
         }
-        Ok(())
+    }
+    match unmatched {
+        Some(name) => Err(EggError::FileNotFound(name)),
+        None => Ok(()),
     }
 }
 
