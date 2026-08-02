@@ -1,6 +1,6 @@
-.TH UNEGG 1 "2026-07-29" "unegg 0.2.0" "User Commands"
+.TH UNEGG 1 "2026-07-29" "unegg 0.2.1" "User Commands"
 .SH NAME
-unegg \- extract or list an EGG archive
+unegg \- extract files from an EGG archive
 .SH SYNOPSIS
 .B unegg
 [\fIOPTION\fR]... \fIARCHIVE\fR [\fIFILE\fR]...
@@ -9,43 +9,44 @@ unegg \- extract or list an EGG archive
 [\fIOPTION\fR]... \fB\-\fR [\fIFILE\fR]...
 .SH DESCRIPTION
 .B unegg
-extracts or lists the contents of an EGG archive. With no \fIFILE\fR operand,
-every entry is extracted; otherwise only the named entries are. A lone
+extracts files from an EGG archive, or lists its contents. With no \fIFILE\fR
+operand every file is extracted; otherwise only the named \fIFILE\fRs are. A
+single
 .B \-
 in place of \fIARCHIVE\fR reads the archive from standard input. Solid and split
 (multi-volume) archives are handled transparently.
 .SH OPTIONS
 .TP
 .BR \-l ", " \-\-list
-List archive contents instead of extracting.
+List the archive contents; do not extract.
 .TP
-.BR \-d ", " \-\-output\-dir " \fIDIR\fR"
-Extract into \fIDIR\fR (default: the current directory).
+.BR \-d ", " \-\-output\-dir=\fIDIR\fR
+Extract into \fIDIR\fR instead of the current directory.
 .TP
 .BR \-p ", " \-\-pipe
-Extract to standard output instead of to files.
+Write extracted files to standard output.
 .TP
-.BR \-P ", " \-\-password " \fIPW\fR"
-Decryption password for an encrypted archive. When omitted, an encrypted
-archive prompts on the terminal.
+.BR \-P ", " \-\-password=\fIPW\fR
+Decrypt the archive with password \fIPW\fR. When omitted, an encrypted archive
+prompts on the terminal.
 .TP
 .BR \-q ", " \-\-quiet
-Suppress progress messages.
+Suppress informational messages.
 .TP
 .BR \-h ", " \-\-help
-Show a help summary and exit.
+Display a help summary and exit.
 .TP
 .BR \-V ", " \-\-version
-Show version information and exit.
+Display version information and exit.
 .PP
-Short flags may be bundled, for example
+Short options may be bundled, for example
 .BR \-lq .
-An option that takes an argument may be given as
-.BR \-d DIR ", " "\-d " DIR ", " \-\-output\-dir=DIR ", or " "\-\-output\-dir " DIR.
-A
-.B \-\-
-argument ends option parsing; every argument after it is treated as a
-\fIFILE\fR name.
+An option that takes an argument accepts it joined or separate, and long options
+accept it with
+.RB ` = '
+or as the next argument, so
+.BR \-d DIR ", " "\-d " DIR ", " \-\-output\-dir=DIR ", and " "\-\-output\-dir " DIR
+are equivalent.
 .SH "EXIT STATUS"
 .TP
 .B 0
@@ -66,7 +67,9 @@ Extract an encrypted archive into \fBout/\fR.
 .TP
 .B unegg \-l archive.egg
 List the archive contents.
+.SH "REPORTING BUGS"
+Report bugs at <https://github.com/alkegi/unegg/issues>.
 .SH "SEE ALSO"
 .BR unalz (1)
 .SH AUTHORS
-Part of the alkegi project <https://github.com/alkegi>.
+Part of the alkegi (알깨기) project <https://github.com/alkegi>.

@@ -28,7 +28,11 @@ cat archive.egg | unegg -l -      # read from stdin
 | `-h` | `--help` | show help and exit |
 | `-V` | `--version` | show version and exit |
 
-Short flags bundle (`-lq`). See [`unegg.1`](man/unegg.1) for the man page.
+## Install
+
+```
+cargo install unegg
+```
 
 ## Supported Features
 
@@ -51,3 +55,7 @@ Short flags bundle (`-lq`). See [`unegg.1`](man/unegg.1) for the man page.
 ## Docs
 
 [https://github.com/alkegi/docs](https://github.com/alkegi/docs)
+
+---
+
+Part of the [alkegi (알깨기)](https://github.com/alkegi) project.
