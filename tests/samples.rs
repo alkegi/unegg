@@ -11,6 +11,12 @@ use std::path::Path;
 #[allow(clippy::type_complexity)] // a test-data table, not a public API type
 const SAMPLES: &[(&str, Option<&str>, bool, &[(&str, u64, u32)])] = &[
     (
+        "azo_pe.egg",
+        None,
+        false,
+        &[("hello.sys", 148781, 0xb9a7aa7c)],
+    ),
+    (
         "bzip2_big.egg",
         None,
         false,
@@ -63,6 +69,12 @@ const SAMPLES: &[(&str, Option<&str>, bool, &[(&str, u64, u32)])] = &[
         Some("test1234"),
         false,
         &[("text.txt", 9000, 0x1859c604)],
+    ),
+    (
+        "enc_lea_bzip2.egg",
+        Some("test1234"),
+        false,
+        &[("text.txt", 3600, 0x2c19aec0)],
     ),
     (
         "lzma5.egg",
